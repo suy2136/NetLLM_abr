@@ -1,0 +1,11 @@
+This repository is derived from NetLLM:
+https://github.com/duowuyms/NetLLM
+
+The adaptive bitrate streaming environment is based on Genet:
+https://github.com/GenetProject/Genet
+
+Original and modified source files remain under the repository's MIT License.
+The official NetLLM LoRA checkpoint is downloaded from the distribution link
+published by the NetLLM authors and is not redistributed in this Git history.
+Llama-2 weights are not distributed by this repository. Users must obtain
+access from the model provider and comply with the applicable model license.

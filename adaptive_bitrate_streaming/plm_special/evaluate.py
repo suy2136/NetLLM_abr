@@ -59,7 +59,24 @@ def evaluate_on_env(args, env_settings, model, target_return, max_ep_num=50, pro
                 episodes_return += reward
                 episodes_len += 1
 
-            bit_rate = model.sample(state, target_return, timestep)
+            try:
+                bit_rate = model.sample(state, target_return, timestep)
+            except FloatingPointError as error:
+                eval_log.update({
+                    'evaluation_valid': False,
+                    'nonfinite_error': str(error),
+                    'nonfinite_trace_index': int(env.trace_idx),
+                    'nonfinite_trace_name': env_settings['all_file_names'][
+                        env.trace_idx
+                    ],
+                    'nonfinite_timestep': int(timestep),
+                    'nonfinite_details': getattr(
+                        model, 'last_nonfinite_inference', None
+                    ),
+                })
+                if hasattr(model, 'clear_dq'):
+                    model.clear_dq()
+                break
             timestep += 1
 
             if end_of_video:
@@ -74,6 +91,7 @@ def evaluate_on_env(args, env_settings, model, target_return, max_ep_num=50, pro
                     break
     
     eval_log.update({
+        'evaluation_valid': eval_log.get('evaluation_valid', True),
         'time/evaluation': time.time() - eval_start,
         'episodes_return': episodes_return,
         'episodes_len': episodes_len,

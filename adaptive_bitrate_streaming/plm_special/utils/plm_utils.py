@@ -148,12 +148,18 @@ def load_plm(model_name, model_path, specials_to_add = None, **kwargs):
     # model = model_class.model.from_pretrained(model_path)
     device_input_side = kwargs.pop('device_input_side', None)
     device_output_side = kwargs.pop('device_output_side', None)
+    torch_dtype = kwargs.pop('torch_dtype', None)
+    from_pretrained_kwargs = {'config': model_config}
+    if torch_dtype is not None:
+        from_pretrained_kwargs['torch_dtype'] = torch_dtype
     if 'llama' in model_name and device_input_side is not None and device_output_side is not None:
         device_middle_side = kwargs.pop('device_middle_side', None)
         device_map = create_device_map_for_llama(device_input_side, device_output_side, device_middle_side)
-        model = model_class.model.from_pretrained(model_path, config=model_config, device_map=device_map)
+        model = model_class.model.from_pretrained(
+            model_path, device_map=device_map, **from_pretrained_kwargs
+        )
     else:
-        model = model_class.model.from_pretrained(model_path, config=model_config)
+        model = model_class.model.from_pretrained(model_path, **from_pretrained_kwargs)
     
     tokenizer = model_class.tokenizer.from_pretrained(model_path) 
     print("If tokenizer is loaded: ",tokenizer.encode("hello world"),"\n")

@@ -1,55 +1,115 @@
-# NetLLM
+# NetLLM ABR Inference Acceleration
 
-Hi! This is the official repository of SIGCOMM 2024 paper "[NetLLM: Adapting Large Language Models for Networking](https://dl.acm.org/doi/abs/10.1145/3651890.3672268)".
+This repository is an inference-focused fork of
+[NetLLM](https://github.com/duowuyms/NetLLM). It reproduces the adaptive
+bitrate streaming (ABR) task with the official rank-128 NetLLM LoRA and adds
+three optional, training-free inference modules:
 
-## Abstract
+1. event-aware temporal history selection;
+2. recent or event-conditioned token selection;
+3. robust-MPC speculative inference.
 
-Many networking tasks now employ deep learning (DL) to solve complex prediction and optimization problems. However, current design philosophy of DL-based algorithms entails intensive engineering overhead due to the manual design of deep neural networks (DNNs) for different networking tasks. Besides, DNNs tend to achieve poor generalization performance on unseen data distributions/environments. 
+The bundled evaluation assets are the 100 `fcc-test` traces, the six video-1
+chunk-size files, and NetLLM's ABR experience pool. Llama-2 and LoRA weights
+are intentionally not committed.
 
-Motivated by the recent success of large language models (LLMs), this work studies the LLM adaptation for networking to explore a more sustainable design philosophy. With the powerful pre-trained knowledge, the LLM is promising to serve as the foundation model to achieve “one model for all tasks” with even better performance and stronger generalization. In pursuit of this vision, we present NetLLM, the first framework that provides a coherent design to harness the powerful capabilities of LLMs with low efforts to solve networking problems. Specifically, NetLLM empowers the LLM to effectively process multimodal data in networking and efficiently generate task-specific answers. Besides, NetLLM drastically reduces the costs of fine-tuning the LLM to acquire domain knowledge for networking. Across three networking-related use cases - viewport prediction, adaptive bitrate streaming and cluster job scheduling, we showcase that the NetLLM-adapted LLM significantly outperforms state-of-the-art algorithms.
+## Installation
 
-![netllm](images/netllm.png)
+```bash
+conda create -n netllm-abr python=3.10 -y
+conda activate netllm-abr
+pip install -r requirements-inference.txt
+```
 
-## Overview
+Llama-2 is gated. Accept Meta's terms on Hugging Face and authenticate before
+running the preparation script:
 
-**NetLLM** **is the first framework that provides a coherent design to utilize the powerful capabilities of LLMs to solve various networking tasks with low efforts.** It includes the following three design components:
+```bash
+huggingface-cli login
+python scripts/prepare_models.py
+python scripts/check_installation.py --require-cuda
+```
 
-- **Multimodal encoder:** Enabling the LLM to understand the multimodal information in networking effectively.
-- **Networking head:** Enabling the LLM to generate answers for networking efficiently.
-- **Data-driven low-rank networking adaptation (DD-LRNA):** Enabling the LLM to learn domain-specific knowledge for networking efficiently, based on data-driven reinforcement learning and parameter-efficient fine-tune.
+The scripts use these default locations:
 
-![framework](images/framework.png)
+```text
+downloaded_plms/llama/base/
+adaptive_bitrate_streaming/data/ft_plms/try_llama2_7b/
+```
 
-## Evaluation & Insights
+You can also prepare both directories manually and pass their paths to the
+scripts with `--base-model-dir` and `--checkpoint-dir`.
 
-By default, we use Llama2-7B as the LLM and then use NetLLM to adapt it for three networking-related tasks: VP, ABR and CJS. We then compare the NetLLM-adapted Llama2 with three other state-of-the-art algorithms on each task. 
+## Smoke test
 
-![1](images/1.png)
+```bash
+cd adaptive_bitrate_streaming
+python analysis/smoke_test_inference_features.py --mode check
+python analysis/smoke_test_inference_features.py --mode real \
+  --base-model-dir ../downloaded_plms/llama/base \
+  --checkpoint-dir data/ft_plms/try_llama2_7b \
+  --device cuda:0
+```
 
-![2](images/2.png)
+All modules are inference-only and use the same official rank-128 LoRA. No
+selector or speculative module training is required.
 
-![3](images/3.png)
+## Module switches
 
-![4](images/4.png)
+Run commands from `adaptive_bitrate_streaming/`. Common arguments are:
 
-## Contributors
+```bash
+COMMON="--test --fp16 --seed 1 --plm-type llama --plm-size base --rank 128 \
+--plm-dir ../downloaded_plms/llama/base \
+--model-dir data/ft_plms/try_llama2_7b \
+--trace fcc-test --trace-num 100 --video video1 --fixed-order \
+--device cuda:0 --device-out cuda:0"
+```
 
-[Duo Wu](https://duowuyms.github.io/), [Xianda Wang](https://github.com/wangxiandabetter), [Yaqi Qiao](https://github.com/qyqyq77), [Linjia Kang](https://github.com/xiaogou1234)
+| Configuration | Additional arguments |
+|---|---|
+| Original NetLLM | `--temporal-selector none --token-selector none --speculative-draft-steps 0` |
+| Temporal only | `--temporal-selector event-aware --token-selector none --speculative-draft-steps 0` |
+| Recent-token only | `--temporal-selector none --token-selector recent-timestep --selector-history-steps 5 --speculative-draft-steps 0` |
+| Hierarchical temporal + token | `--temporal-selector event-aware --token-selector intra-timestep --speculative-draft-steps 0` |
+| Speculative only | `--temporal-selector none --token-selector none --speculative-draft-steps 3` |
+| All three | `--temporal-selector event-aware --token-selector intra-timestep --speculative-draft-steps 3` |
+
+Example:
+
+```bash
+python run_plm.py $COMMON \
+  --temporal-selector event-aware \
+  --event-max-events 3 \
+  --token-selector intra-timestep \
+  --speculative-draft-steps 3
+```
+
+### Parameters
+
+| Module | Parameters | Defaults |
+|---|---|---|
+| Temporal | `event-max-events`, `event-min-spacing` | `3`, `2` |
+| Temporal | `event-throughput-threshold`, `event-buffer-threshold`, `event-bitrate-jump-threshold` | `0.60`, `6.0`, `1` |
+| Recent token | `selector-history-steps` | `20` |
+| Speculative | `speculative-draft-steps`, `speculative-verification-mode` | `0`, `sample` |
+| Speculative | buffer/state/return tolerance | `1.0`, `0.25`, `0.01` |
+
+`event-aware + recent-timestep` is intentionally rejected because both select
+whole history timesteps. Use `event-aware + intra-timestep` for the sequential
+temporal-to-token pipeline.
+
+Results are written below `adaptive_bitrate_streaming/artifacts/results/`.
+`selector_metrics.json` includes QoE, latency, token reduction, speculative
+acceptance/fallback counts, and target-LLM-call counts.
+
+## Repository scope
+
+Training traces, TensorFlow baseline checkpoints, viewport prediction, cluster
+job scheduling, local experiment results, Llama weights, and LoRA weights are
+not part of this inference release. See `NOTICE` for upstream attribution.
 
 ## Citation
 
-If you find this repository useful, please cite our paper:
-
-> @inproceedings{wu2024netllm,
->       author = {Wu, Duo and Wang, Xianda and Qiao, Yaqi and Wang, Zhi and Jiang, Junchen and Cui, Shuguang and Wang, Fangxin},
->       title = {NetLLM: Adapting Large Language Models for Networking},
->       year = {2024},
->       publisher = {Association for Computing Machinery},
->       address = {New York, NY, USA},
->       doi = {10.1145/3651890.3672268},
->       booktitle = {Proceedings of the ACM SIGCOMM 2024 Conference},
->       pages = {661–678},
->       numpages = {18},
->       location = {Sydney, NSW, Australia},
->       series = {ACM SIGCOMM '24}
-> }
+If this code is useful, cite the original NetLLM and Genet papers listed in
+`adaptive_bitrate_streaming/README.md`.

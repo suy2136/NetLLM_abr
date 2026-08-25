@@ -6,3 +6,13 @@ results
 
 downloaded_plms
 ft_plms
+
+# Public ABR inference weights and generated outputs
+adaptive_bitrate_streaming/data/ft_plms/
+adaptive_bitrate_streaming/artifacts/results/
+*.zip
+*.tar.gz
+*.pt
+*.pth
+*.bin
+*.safetensors

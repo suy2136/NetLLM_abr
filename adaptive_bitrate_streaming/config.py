@@ -1,37 +1,30 @@
-import os
+from pathlib import Path
 
 
 class Config:
-    _base_dir = '' if 'adaptive_bitrate_streaming' in os.getcwd() else 'adaptive_bitrate_streaming/'
-    baseline_model_paths = {
-        'genet': _base_dir + 'data/all_models/genet/nn_model_ep_9900.ckpt',
-        'udr_1': _base_dir + 'data/all_models/udr_1/nn_model_ep_57600.ckpt',
-        'udr_2': _base_dir + 'data/all_models/udr_2/nn_model_ep_52400.ckpt',
-        'udr_3': _base_dir + 'data/all_models/udr_3/nn_model_ep_58000.ckpt',
-        'udr_real': _base_dir + 'data/all_models/udr_real/nn_model_ep_49000.ckpt',
-    }
+    # Resolve every bundled asset relative to this file. This keeps inference
+    # independent of the shell's current working directory.
+    _base_dir = Path(__file__).resolve().parent
+    baseline_model_paths = {}
     
     trace_dirs = {
-        'fcc-train': _base_dir + 'data/traces/train/fcc-train/',
-        'fcc-valid': _base_dir + 'data/traces/valid/fcc-valid/',
-        'fcc-test': _base_dir + 'data/traces/test/fcc-test/',
+        'fcc-test': str(_base_dir / 'data' / 'traces' / 'test' / 'fcc-test'),
     }
 
     video_size_dirs = {
-        'video1': _base_dir + 'data/videos/video1_sizes/',
-        'video2': _base_dir + 'data/videos/video2_sizes/',
+        'video1': str(_base_dir / 'data' / 'videos' / 'video1_sizes'),
     }
 
-    artifacts_dir = _base_dir + 'artifacts/'
-    results_dir = artifacts_dir + 'results/'
-    exp_pools_dir = artifacts_dir + 'exp_pools/'
+    artifacts_dir = str(_base_dir / 'artifacts')
+    results_dir = str(_base_dir / 'artifacts' / 'results')
+    exp_pools_dir = str(_base_dir / 'artifacts' / 'exp_pools')
 
     # plm special
     plm_types = ['gpt2', 'llama', 'llava', 't5-lm', 'opt', 'mistral']
     plm_sizes = ['xxs', 'xs', 'small', 'base', 'large', 'xl', 'xxl']  # note that the actual size of plm is dependent on the type of plm. 
                                                          # for example, for llama, 'base' is 7b, while for gpt2, 'base' is 340M. you can specify it yourself.
-    plm_dir = _base_dir + ('../../downloaded_plms' if 'adaptive_bitrate_streaming' in _base_dir else '../downloaded_plms')
-    plm_ft_dir = _base_dir + 'data/ft_plms'
+    plm_dir = str(_base_dir.parent / 'downloaded_plms')
+    plm_ft_dir = str(_base_dir / 'data' / 'ft_plms')
     plm_embed_sizes = {
         'gpt2': {
             'base': 1024,

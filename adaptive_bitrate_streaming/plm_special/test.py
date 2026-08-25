@@ -1,5 +1,7 @@
 import copy
+import json
 import os
+import numpy as np
 import torch
 import time
 
@@ -17,6 +19,9 @@ def test_on_env(args, model, results_dir, env_settings, target_return, max_ep_nu
 
     test_log = {}
     test_start = time.time()
+    inference_latencies_ms = []
+    original_token_counts = []
+    selected_token_counts = []
     
     results_log = {}
     with torch.no_grad():
@@ -73,15 +78,15 @@ def test_on_env(args, model, results_dir, env_settings, target_return, max_ep_nu
                 episodes_return += reward
                 episodes_len += 1
 
-            bit_rate = model.sample(state, target_return, timestep)
-            timestep += 1
-
+            # There is no next bitrate decision after the final video chunk.
+            # Skipping inference here avoids one unused PLM call per episode.
             if end_of_video:
                 last_bit_rate = DEFAULT_QUALITY
                 bit_rate = DEFAULT_QUALITY
                 torch.zero_(state)
                 timestep = 0
                 target_return = copy.deepcopy(target_return_clone)
+                model.clear_dq()
 
                 ep_count += 1
                 if ep_count >= max_ep_num:
@@ -89,7 +94,35 @@ def test_on_env(args, model, results_dir, env_settings, target_return, max_ep_nu
 
                 trace_idx = env.trace_idx
                 results_log[trace_idx] = []
-    
+                continue
+
+            if str(args.device).startswith('cuda') and torch.cuda.is_available():
+                torch.cuda.synchronize(args.device)
+            inference_start = time.perf_counter()
+            if getattr(args, 'speculative_draft_steps', 0) > 0:
+                bit_rate = model.sample_speculative(
+                    state=state,
+                    target_return=target_return,
+                    timestep=timestep,
+                    last_bitrate=last_bit_rate,
+                    buffer_size=buffer_size,
+                    video_chunk_remain=video_chunk_remain,
+                    reward_transform=process_reward_fn,
+                )
+            else:
+                bit_rate = model.sample(state, target_return, timestep)
+            if str(args.device).startswith('cuda') and torch.cuda.is_available():
+                torch.cuda.synchronize(args.device)
+            inference_latencies_ms.append(
+                (time.perf_counter() - inference_start) * 1000.0
+            )
+            selection_trace = getattr(model, 'last_selection_trace', {})
+            if selection_trace and selection_trace.get('target_model_called', True):
+                original_token_counts.append(selection_trace['original_length'])
+                selected_token_counts.append(selection_trace['selected_length'])
+            timestep += 1
+
+
     test_log.update({'time': time.time() - test_start})
 
     # write results to disk
@@ -111,4 +144,87 @@ def test_on_env(args, model, results_dir, env_settings, target_return, max_ep_nu
                                   str(reward) + '\n' )
             result_file.close()
     test_log['mean_reward'] = calc_mean_reward(result_files=os.listdir(results_dir), test_dir=results_dir, str='', skip_first_reward=True)
+    # NetLLM's ABR QoE excludes the first chunk of every trace.  Export the
+    # corresponding QoE components as well as the aggregate reward so model
+    # quality, rebuffering, and smoothness remain independently auditable.
+    evaluated_chunks = [
+        item for trace_values in results_log.values()
+        for item in trace_values[1:]
+    ]
+    if evaluated_chunks:
+        bitrates_mbps = [item[1] / M_IN_K for item in evaluated_chunks]
+        rebuffer_seconds = [item[3] for item in evaluated_chunks]
+        smoothness_mbps = [item[6] for item in evaluated_chunks]
+        raw_qoe = [item[7] for item in evaluated_chunks]
+        test_log.update({
+            'qoe_raw_mean': float(np.mean(raw_qoe)),
+            'mean_bitrate_mbps': float(np.mean(bitrates_mbps)),
+            'mean_rebuffer_s_per_chunk': float(np.mean(rebuffer_seconds)),
+            'total_rebuffer_s': float(np.sum(rebuffer_seconds)),
+            'mean_smoothness_mbps': float(np.mean(smoothness_mbps)),
+            'evaluated_video_chunks': len(evaluated_chunks),
+        })
+    total_original_tokens = sum(original_token_counts)
+    total_selected_tokens = sum(selected_token_counts)
+    test_log.update({
+        'temporal_selector': getattr(args, 'temporal_selector', 'none'),
+        'selector': getattr(args, 'token_selector', 'none'),
+        'selector_history_steps': getattr(args, 'selector_history_steps', None),
+        'event_max_events': getattr(args, 'event_max_events', None),
+        'event_min_spacing': getattr(args, 'event_min_spacing', None),
+        'event_throughput_threshold': getattr(
+            args, 'event_throughput_threshold', None
+        ),
+        'event_buffer_threshold': getattr(
+            args, 'event_buffer_threshold', None
+        ),
+        'event_bitrate_jump_threshold': getattr(
+            args, 'event_bitrate_jump_threshold', None
+        ),
+        'inference_calls': len(inference_latencies_ms),
+        'inference_latency_mean_ms': float(np.mean(inference_latencies_ms)),
+        'inference_latency_p50_ms': float(np.percentile(inference_latencies_ms, 50)),
+        'inference_latency_p95_ms': float(np.percentile(inference_latencies_ms, 95)),
+        'original_tokens_mean': float(np.mean(original_token_counts)),
+        'selected_tokens_mean': float(np.mean(selected_token_counts)),
+        'token_reduction_ratio': (
+            0.0 if total_original_tokens == 0
+            else 1.0 - total_selected_tokens / total_original_tokens
+        ),
+    })
+    selector_metrics = model.get_selector_metrics()
+    event_selector_calls = (
+        selector_metrics['temporal_selector_calls']
+        or selector_metrics['selector_calls']
+    )
+    selector_metrics['event_timesteps_selected_mean'] = (
+        0.0 if event_selector_calls == 0
+        else selector_metrics['event_timesteps_selected'] / event_selector_calls
+    )
+    test_log.update(selector_metrics)
+    speculative_metrics = model.get_speculative_metrics()
+    target_plm_calls = speculative_metrics['target_plm_calls']
+    test_log.update({
+        'speculative_draft_steps': getattr(args, 'speculative_draft_steps', 0),
+        'speculative_verification_mode': getattr(
+            args, 'speculative_verification_mode', 'sample'
+        ),
+        'speculative_buffer_tolerance': getattr(
+            args, 'speculative_buffer_tolerance', None
+        ),
+        'speculative_state_tolerance': getattr(
+            args, 'speculative_state_tolerance', None
+        ),
+        'speculative_return_tolerance': getattr(
+            args, 'speculative_return_tolerance', None
+        ),
+        'target_plm_calls': target_plm_calls,
+        'llm_call_reduction_ratio': (
+            0.0 if not inference_latencies_ms
+            else 1.0 - target_plm_calls / len(inference_latencies_ms)
+        ),
+        **speculative_metrics,
+    })
+    with open(os.path.join(results_dir, 'selector_metrics.json'), 'w') as f:
+        json.dump(test_log, f, indent=2, sort_keys=True)
     return test_log
