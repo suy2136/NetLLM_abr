@@ -169,7 +169,7 @@ Llama weight에 소량 포함된 FP32 `rotary_emb.inv_freq`는 정상입니다. 
 ```bash
 cd adaptive_bitrate_streaming
 
-COMMON="--test --fp16 --seed 1 --plm-type llama --plm-size base --rank 128 \
+COMMON="--fp16 --seed 1 --plm-type llama --plm-size base --rank 128 \
 --plm-dir ../downloaded_plms/llama/base \
 --model-dir data/ft_plms/try_llama2_7b \
 --trace fcc-test --trace-num 100 --video video1 --fixed-order \
@@ -188,7 +188,7 @@ COMMON="--test --fp16 --seed 1 --plm-type llama --plm-size base --rank 128 \
 예시:
 
 ```bash
-python run_plm.py $COMMON \
+python run_plm.py --test $COMMON \
   --temporal-selector event-aware \
   --event-max-events 3 \
   --token-selector intra-timestep \
@@ -208,6 +208,93 @@ python run_plm.py $COMMON \
 | Speculative | `--speculative-draft-steps` | `0`(비활성화) |
 | Speculative | `--speculative-verification-mode` | `sample` |
 | Speculative | buffer/state/return tolerance | `1.0` / `0.25` / `0.01` |
+
+### 모듈별 파라미터 조정 명령
+
+다음 명령은 위에서 정의한 `$COMMON`을 사용하며
+`adaptive_bitrate_streaming/`에서 실행합니다. 단일 설정만 확인할 때는
+`run_plm.py`에 원하는 값을 직접 전달합니다.
+
+Temporal selector:
+
+```bash
+python run_plm.py --test $COMMON \
+  --temporal-selector event-aware \
+  --event-max-events 4 \
+  --event-min-spacing 2 \
+  --event-throughput-threshold 0.60 \
+  --event-buffer-threshold 6.0 \
+  --event-bitrate-jump-threshold 1 \
+  --token-selector none \
+  --speculative-draft-steps 0
+```
+
+Token selector:
+
+```bash
+python run_plm.py --test $COMMON \
+  --temporal-selector none \
+  --token-selector recent-timestep \
+  --selector-history-steps 5 \
+  --speculative-draft-steps 0
+```
+
+Speculative inference:
+
+```bash
+python run_plm.py --test $COMMON \
+  --temporal-selector none \
+  --token-selector none \
+  --speculative-draft-steps 3 \
+  --speculative-verification-mode sample \
+  --speculative-buffer-tolerance 1.0 \
+  --speculative-state-tolerance 0.25 \
+  --speculative-return-tolerance 0.01
+```
+
+여러 값을 순차 평가하려면 각 모듈의 sweep runner를 사용합니다. 모든
+runner는 모듈을 끈 baseline을 먼저 실행하고 각 결과와 요약 CSV를
+`artifacts/results/`에 저장합니다.
+
+Temporal의 보존 event 수 `K` sweep:
+
+```bash
+python analysis/run_temporal_sweep.py \
+  --max-events 1 2 3 4 \
+  --min-spacing 2 \
+  --throughput-threshold 0.60 \
+  --buffer-threshold 6.0 \
+  --bitrate-jump-threshold 1 \
+  --output-csv artifacts/results/temporal_sweep.csv \
+  -- $COMMON
+```
+
+Token의 최근 history 길이 `H` sweep:
+
+```bash
+python analysis/run_selector_sweep.py \
+  --history-steps 1 2 3 4 5 8 12 20 \
+  --output-csv artifacts/results/token_sweep.csv \
+  -- $COMMON
+```
+
+Speculative draft 길이 `k` sweep:
+
+```bash
+python analysis/run_speculative_sweep.py \
+  --draft-steps 2 3 \
+  --verification-mode sample \
+  --buffer-tolerance 1.0 \
+  --state-tolerance 0.25 \
+  --return-tolerance 0.01 \
+  --output-csv artifacts/results/speculative_sweep.csv \
+  -- $COMMON
+```
+
+Temporal threshold 또는 Speculative tolerance 조합을 바꾸려면 해당 sweep
+명령을 값별로 반복하고 `--output-csv` 이름을 다르게 지정합니다. 실제
+모델을 로드하지 않고 생성될 명령만 확인하려면 세 runner 모두에
+`--dry-run`을 추가할 수 있습니다.
 
 ## 검증 및 평가
 
