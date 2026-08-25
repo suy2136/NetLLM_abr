@@ -441,7 +441,7 @@ class OfflineRLPolicy(nn.Module):
             "selected_history_steps": selection["selected_steps"],
             "event_scores": selection["event_scores"],
         }
-        self._record_event_metadata(metadata)
+        OfflineRLPolicy._record_event_metadata(self, metadata)
 
     def _record_selection(self, selection):
         self.selector_stats["selector_calls"] += 1
@@ -459,7 +459,7 @@ class OfflineRLPolicy(nn.Module):
         ) and getattr(self, "temporal_selector", None) is None:
             self.selector_stats["latest_history_steps_preserved"] += 1
         if metadata.get("event_scores"):
-            self._record_event_metadata(metadata)
+            OfflineRLPolicy._record_event_metadata(self, metadata)
 
     def _apply_temporal_selection(
         self, stacked_inputs, context_start, protected_suffix_tokens
