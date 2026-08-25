@@ -456,7 +456,7 @@ class OfflineRLPolicy(nn.Module):
         if (
             metadata.get("preserves_latest_history_step")
             or metadata.get("preserves_latest_history_block")
-        ) and self.temporal_selector is None:
+        ) and getattr(self, "temporal_selector", None) is None:
             self.selector_stats["latest_history_steps_preserved"] += 1
         if metadata.get("event_scores"):
             self._record_event_metadata(metadata)
