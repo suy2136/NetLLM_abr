@@ -103,6 +103,34 @@ Results are written below `adaptive_bitrate_streaming/artifacts/results/`.
 `selector_metrics.json` includes QoE, latency, token reduction, speculative
 acceptance/fallback counts, and target-LLM-call counts.
 
+## Complete six-condition evaluation
+
+The unified runner evaluates all module combinations sequentially with the
+same official LoRA, seed 1, and 100 FCC traces:
+
+```bash
+python adaptive_bitrate_streaming/analysis/run_official_lora_ablation.py \
+  --device cuda:0 \
+  --output adaptive_bitrate_streaming/artifacts/results/official_lora_module_ablation.csv \
+  --resume
+```
+
+It saves each completed row immediately to CSV/JSON and records the complete
+configuration in a manifest. Use `--only temporal_only token_only` to run a
+subset, or `--dry-run` to inspect commands without loading the model.
+
+Before publishing or after cloning into a fresh environment, run:
+
+```bash
+python scripts/validate_release.py
+python scripts/validate_release.py --with-model --device cuda:0
+```
+
+The first command checks scope, bundled assets, compilation, and CPU tests.
+The second additionally checks CUDA/model files and executes a one-trace GPU
+smoke test. See [REPRODUCIBILITY.md](REPRODUCIBILITY.md) for the clean-host
+procedure.
+
 ## Repository scope
 
 Training traces, TensorFlow baseline checkpoints, viewport prediction, cluster
