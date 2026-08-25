@@ -12,15 +12,19 @@ DEFAULT_BASE_MODEL = REPO_ROOT / 'downloaded_plms' / 'llama' / 'base'
 DEFAULT_CHECKPOINT = ABR_ROOT / 'data' / 'ft_plms' / 'try_llama2_7b'
 
 
-def validate_scope():
+def validate_scope(allow_upstream_data=False):
     problems = []
-    excluded = (
+    excluded = [
         REPO_ROOT / 'viewport_prediction',
         REPO_ROOT / 'cluster_job_scheduling',
-        ABR_ROOT / 'data' / 'all_models',
-        ABR_ROOT / 'data' / 'traces' / 'train',
-        ABR_ROOT / 'data' / 'traces' / 'valid',
-    )
+    ]
+    if not allow_upstream_data:
+        excluded.extend((
+            ABR_ROOT / 'data' / 'all_models',
+            ABR_ROOT / 'data' / 'traces' / 'train',
+            ABR_ROOT / 'data' / 'traces' / 'valid',
+            ABR_ROOT / 'data' / 'videos' / 'video2_sizes',
+        ))
     for path in excluded:
         if path.exists():
             problems.append(f'excluded release path still exists: {path}')
@@ -57,9 +61,13 @@ def main():
     parser.add_argument('--base-model-dir', type=Path, default=DEFAULT_BASE_MODEL)
     parser.add_argument('--checkpoint-dir', type=Path, default=DEFAULT_CHECKPOINT)
     parser.add_argument('--device', default='cuda:0')
+    parser.add_argument(
+        '--allow-upstream-data', action='store_true',
+        help='allow locally restored upstream train/valid/video2/baseline data',
+    )
     args = parser.parse_args()
 
-    problems = validate_scope()
+    problems = validate_scope(args.allow_upstream_data)
     if problems:
         for problem in problems:
             print(f'- {problem}')
@@ -96,4 +104,3 @@ def main():
 
 if __name__ == '__main__':
     raise SystemExit(main())
-

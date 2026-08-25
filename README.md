@@ -120,6 +120,73 @@ NumPy 1.24.4입니다. 전체 버전은
 | Video-1 chunk sizes | 저장소에 포함 | `adaptive_bitrate_streaming/data/videos/video1_sizes/` | `video_size_0`~`video_size_5` |
 | ABR experience pool | 저장소에 포함 | `adaptive_bitrate_streaming/artifacts/exp_pools/exp_pool.pkl` | 평가용 experience pool |
 
+### ABR 데이터 범위와 원본 전체 데이터 복원
+
+이 저장소의 `adaptive_bitrate_streaming/data/`는 원본 NetLLM ABR 데이터
+전체가 아니라 **공식 LoRA 추론 평가에 필요한 subset**입니다. 원본
+NetLLM master와 비교한 구성은 다음과 같습니다.
+
+| 데이터 | 원본 NetLLM | 이 저장소 | 용도 |
+|---|---:|---:|---|
+| `traces/test/fcc-test` | 101개 파일 | 101개 파일 | 100개 test trace와 `mahimahi_ptrs.pkl` |
+| `videos/video1_sizes` | 6개 파일 | 6개 파일 | 기본 video1 추론 평가 |
+| `traces/train/fcc-train` | 235개 파일 | 미포함 | LoRA/정책 재학습 |
+| `traces/valid/fcc-valid` | 150개 파일 | 미포함 | 학습 중 validation |
+| `videos/video2_sizes` | 6개 파일 | 미포함 | video2 평가 |
+| `all_models` | 18개 파일 | 미포함 | Genet/UDR TensorFlow baseline |
+
+이 저장소에 포함된 `fcc-test`, `video1_sizes`, `exp_pool.pkl`은 원본
+NetLLM 파일과 동일합니다. 따라서 README의 **공식 rank-128 LoRA +
+fcc-test 100 traces + video1** 추론 비교에는 추가 데이터 다운로드가
+필요하지 않습니다.
+
+다음 작업을 수행하려면 원본 NetLLM에서 전체 ABR 데이터를 별도로
+받아야 합니다.
+
+- LoRA 또는 ABR 정책 재학습과 validation
+- video2 평가
+- Genet/UDR baseline과의 비교
+- 원본 NetLLM의 전체 데이터 구성을 이용한 재현
+
+현재 fork의 코드를 덮어쓰지 않도록 원본 저장소를 별도 디렉터리에 sparse
+clone한 뒤 필요한 데이터만 복사하는 방법을 권장합니다.
+
+```bash
+cd /workspace
+git clone --depth 1 --filter=blob:none --sparse \
+  https://github.com/duowuyms/NetLLM.git NetLLM-upstream-data
+
+cd NetLLM-upstream-data
+git sparse-checkout set adaptive_bitrate_streaming/data
+
+cd /workspace/netllm_abr_release_test
+mkdir -p adaptive_bitrate_streaming/data/traces
+mkdir -p adaptive_bitrate_streaming/data/videos
+
+cp -a /workspace/NetLLM-upstream-data/adaptive_bitrate_streaming/data/traces/train \
+  adaptive_bitrate_streaming/data/traces/
+cp -a /workspace/NetLLM-upstream-data/adaptive_bitrate_streaming/data/traces/valid \
+  adaptive_bitrate_streaming/data/traces/
+cp -a /workspace/NetLLM-upstream-data/adaptive_bitrate_streaming/data/videos/video2_sizes \
+  adaptive_bitrate_streaming/data/videos/
+cp -a /workspace/NetLLM-upstream-data/adaptive_bitrate_streaming/data/all_models \
+  adaptive_bitrate_streaming/data/
+```
+
+다른 설치 경로에서는 `/workspace/netllm_abr_release_test`를 현재 fork의
+실제 경로로 변경하십시오. 원본 전체 데이터는 용량과 라이선스를 확인한 후
+사용하고, 이 공개 inference 브랜치에는 다시 커밋하지 않는 것을 권장합니다.
+위 경로들은 `.gitignore`에 등록되어 있습니다.
+
+원본 전체 데이터를 복원한 뒤 공개 코드와 모델 실행 환경을 검증할 때는
+데이터 경로 존재를 허용하는 옵션을 추가합니다.
+
+```bash
+python scripts/validate_release.py --allow-upstream-data
+python scripts/validate_release.py \
+  --allow-upstream-data --with-model --device cuda:0
+```
+
 Llama-2는 gated model입니다. 먼저 Meta의 사용 조건을 승인하고 Hugging
 Face token으로 로그인해야 합니다.
 
