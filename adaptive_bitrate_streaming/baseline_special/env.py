@@ -1,4 +1,6 @@
 import numpy as np
+from pathlib import Path
+
 from baseline_special.utils.constants import (TOTAL_VIDEO_CHUNK, VIDEO_CHUNK_LEN)
 
 MILLISECONDS_IN_SECOND = 1000.0
@@ -57,9 +59,10 @@ class Environment:
         self.last_mahimahi_time = self.cooked_time[self.mahimahi_ptr - 1]
 
         self.video_size = {}  # in bytes
+        video_size_dir = Path(video_size_dir)
         for bitrate in range(BITRATE_LEVELS):
             self.video_size[bitrate] = []
-            with open(video_size_dir + 'video_size_' + str(bitrate)) as f:
+            with (video_size_dir / f'video_size_{bitrate}').open() as f:
                 for line in f:
                     self.video_size[bitrate].append(int(line.split()[0]))
 
